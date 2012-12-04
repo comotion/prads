@@ -44,6 +44,7 @@
 
 #include "common.h"
 #include "prads.h"
+#include "dhcp.h"
 #include "sys_func.h"
 #include "mtu.h"
 #include "tos.h"
@@ -1411,8 +1412,10 @@ continue_search:
   }
 
   if (!no_unknown) { 
-     u_ntop_src(pi, outbuf);
-     vlog(2,"%s:%d - UNKNOWN [:?:?]",outbuf,PI_TCP_SP(pi));
+      if (config.verbose) {
+         u_ntop_src(pi, outbuf);
+         vlog(2,"%s:%d - UNKNOWN [:?:?]",outbuf,PI_TCP_SP(pi));
+      }
 
     //display_signature(e->ttl,e->size,orig_df,e->opt,e->optcnt,e->mss,e->wsize,e->wsc,tstamp,e->quirks);
 

@@ -2,9 +2,18 @@
 
 # TODO : apt-get install prads
 
-# On a Ubuntu system:
-$ sudo aptitude install libnet-pcap-perl libgetopt-long-descriptive-perl git-core libdbd-sqlite3-perl
+# On an Ubuntu system:
+$ sudo apt-get install rst2man
 $ git clone git://github.com/gamelinux/prads.git
-$ sudo ln -s $PWD/prads/etc /etc/prads
-$ sudo perl prads/sbin/prads.pl --help
+$ cd prads
+$ make
+$ sudo make install
+
+# On a FreeBSD system (C version)
+$ pkg_add -r pcre git gmake py26-docutils
+$ git clone git://github.com/gamelinux/prads.git
+$ cd prads
+$ gmake
+
+*Note: Installer doesn't work on FreeBSD, so manually copy, or symlink, the binary and config files.
 

@@ -1,17 +1,20 @@
 Source: prads
 Section: utils
 Priority: extra
-Maintainer: Kacper Wysocki (Redpill-Linpro) <kwy@redpill-linpro.com>
-Uploaders: Stig Sandbeck Mathisen <ssm@debian.org>
+Maintainer: Prads package developers <prads-devel@projects.linpro.no>
+Uploaders: Stig Sandbeck Mathisen <ssm@debian.org>,
+           Kacper Wysocki <comotion@krutt.org>
 Build-Depends: debhelper (>= 7.0.50~), libpcap-dev, libpcre3-dev, python-docutils (>= 0.6)
-Standards-Version: 3.9.1
+Standards-Version: 3.9.2
 Homepage: http://gamelinux.github.com/prads/
 Vcs-Git: git://github.com/gamelinux/prads.git
 Vcs-Browser: http://github.com/gamelinux/prads/tree/master
+DM-Upload-Allowed: yes
 
 Package: prads
 Architecture: any
-Depends: ${shlibs:Depends}, ${misc:Depends}, libpcap0.8, libpcre3
+Depends: ${shlibs:Depends}, ${misc:Depends}, libpcap0.8, libpcre3,
+ adduser
 Description: Passive Real-time Asset Detection System
  PRADS is a Passive Real-time Asset Detection System.
  .

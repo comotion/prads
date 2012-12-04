@@ -21,7 +21,6 @@ typedef struct _globalconfig {
     uint8_t     cflags;                 /* config flags */
     uint8_t     verbose;                /* Verbose or not */
     uint8_t     print_updates;          /* Prints updates */
-    uint8_t     use_syslog;             /* Use syslog or not */
     uint8_t     setfilter;
     uint8_t     drop_privs_flag;
     uint8_t     daemon_flag;
@@ -36,6 +35,7 @@ typedef struct _globalconfig {
     connection  *cxtbuffer;             /* Pointer to list of expired connections */
     asset       *passet[BUCKET_SIZE];   /* Pointer to list of assets */
     port_t      *lports[MAX_IP_PROTO];  /* Pointer to list of known ports */
+    char       *file;                   /* config file location, if known */
     char       *assetlog;               /* Filename of prads-asset.log */
     char       *fifo;                   /* Path to FIFO output */
     char       *pcap_file;              /* Filename to pcap too read */
@@ -55,7 +55,6 @@ typedef struct _globalconfig {
     signature   *sig_client_udp;        /* Pointer to list of udp client signatures */
     fmask       *network[MAX_NETS];     /* Struct for fmask */
     char        *dev;                   /* Device name to use for sniffing */
-    char        *dpath;                 /* ... ??? seriously ???... */
     char        *chroot_dir;            /* Directory to chroot to */
     char        *group_name;            /* Groupe to drop privileges too */
     char        *user_name;             /* User to drop privileges too */
@@ -76,10 +75,11 @@ typedef struct _globalconfig {
 #define ISSET_CONFIG_SYSLOG(config)     ((config).cflags & CONFIG_SYSLOG)
 #define ISSET_CONFIG_QUIET(config)      ((config).cflags & CONFIG_QUIET)
 
-void display_config();
-void set_default_config_options();
-void parse_line (bstring line);
-void parse_config_file(bstring fname);
+void display_config(globalconfig *conf);
+void set_default_config_options(globalconfig *conf);
+void parse_line (globalconfig *conf, bstring line);
+void parse_config_file(const char *fname);
+int parse_args(globalconfig *conf, int argc, char *argv[], char *args);
 int brtrim (bstring string);
 int bltrim (bstring string);
 void free_config();

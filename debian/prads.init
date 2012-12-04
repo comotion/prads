@@ -2,8 +2,8 @@
 
 ### BEGIN INIT INFO
 # Provides:          prads
-# Required-Start:    $network $local_fs
-# Required-Stop:     $network $local_fs
+# Required-Start:    $network $local_fs $remote_fs
+# Required-Stop:     $network $local_fs $remote_fs
 # Default-Start:     S 2 3 4 5
 # Default-Stop:      0 1 6
 # Short-Description: Prads Realtime Asset Detection System
@@ -15,14 +15,16 @@
 # Author:       Stig Sandbeck Mathisen <ssm@debian.org>
 #
 
-
 DESC="Prads Realtime Asset Detection System"
 NAME="prads"
 DAEMON="/usr/bin/${NAME}"
 CONFIG="/etc/{$NAME}/{$NAME}.conf"
-OPTIONS="-D"
+USER="prads"
+GROUP="prads"
+CHROOT="/var/run/prads"
+PIDFILE="prads.pid"
 
-HOME_NETS="10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,fe80::/64"
+DAEMON_OPTS="-D -u $(id -u $USER) -g $(id -g $GROUP) -C $CHROOT -p $PIDFILE"
 
 test -f $DAEMON || exit 0
 
@@ -35,12 +37,17 @@ then
     . /etc/default/$NAME
 fi
 
+create_chroot() {
+    install -o $USER -g $GROUP -d $CHROOT
+}
+
 start_service() {
     log_begin_msg "Starting $DESC..."
-    start-stop-daemon --start --quiet --exec $DAEMON -- $OPTIONS \
+    [ ! -d $CHROOT ] && create_chroot
+    start-stop-daemon --start --quiet --pidfile $CHROOT/$PIDFILE \
+        --exec $DAEMON -- $DAEMON_OPTS \
         ${INTERFACE:+-i "${INTERFACE}"} \
-        ${HOME_NETS:+-a "${HOME_NETS}"} \
-        2>&1 | logger -p daemon.info -t prads
+        ${HOME_NETS:+-a "${HOME_NETS}"} 2>&1
     log_end_msg $?
 }
 
@@ -68,5 +75,6 @@ case "$1" in
     stop)    stop_service;;
     status)  status_service;;
     restart) restart_service;;
+    force-reload) restart_service;;
     *) fail;;
 esac

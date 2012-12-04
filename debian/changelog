@@ -1,3 +1,36 @@
+prads (0.3.0~rc3-1) UNRELEASED; urgency=low
+
+  * New upstream release candidate
+
+ -- Stig Sandbeck Mathisen <ssm@debian.org>  Thu, 22 Sep 2011 15:36:28 +0200
+
+prads (0.3.0~rc2-1) UNRELEASED; urgency=low
+
+  * New upstream release candidate
+
+ -- Stig Sandbeck Mathisen <ssm@debian.org>  Thu, 22 Sep 2011 14:57:14 +0200
+
+prads (0.3.0~rc1-1) unstable; urgency=low
+
+  * New upstream release
+  * Init script chroots by default
+
+ -- Kacper Wysocki <comotion@krutt.org>  Mon, 15 Aug 2011 14:16:39 +0200
+
+prads (0.2.6-1) unstable; urgency=low
+
+  * New upstream release
+  * bugfix: lame stack smasher
+  * bugfix: payload ipv6 packets too
+
+ -- Kacper Wysocki <comotion@krutt.org>  Mon, 04 Jul 2011 12:36:58 +0200
+
+prads (0.2.5-1) UNRELEASED; urgency=low
+
+  * New upstream release
+
+ -- Stig Sandbeck Mathisen <ssm@debian.org>  Fri, 13 May 2011 13:02:44 +0200
+
 prads (0.2.3-1) UNRELEASED; urgency=low
 
   * New upstream release

@@ -3,13 +3,31 @@
 
 #define plog(fmt, ...) do{ fprintf(stdout, (fmt), ##__VA_ARGS__); }while(0)
 
-#define olog(fmt, ...) do{ if(!(ISSET_CONFIG_QUIET(config))) fprintf(stdout, (fmt), ##__VA_ARGS__); }while(0)
+#define olog(fmt, ...) \
+do{ \
+    if(!(ISSET_CONFIG_QUIET(config))) { \
+        if(ISSET_CONFIG_SYSLOG(config)) { \
+            syslog(LOG_INFO, (fmt), ##__VA_ARGS__); \
+        } else { \
+            fprintf(stdout, (fmt), ##__VA_ARGS__); \
+        } \
+    } \
+}while(0)
+
 #ifdef DEBUG
 #define dlog(fmt, ...) do { fprintf(stderr, ("[%s:%d(%s)] " fmt), __FILE__, __LINE__, __PRETTY_FUNCTION__, ##__VA_ARGS__);} while(0)
 #define vlog(v, fmt, ...) do{ if(DEBUG == v) fprintf(stderr, ("[%s:%d(%s)] " fmt), __FILE__, __LINE__, __PRETTY_FUNCTION__, ##__VA_ARGS__); }while(0)
-#define elog(fmt, ...) fprintf(stderr, ("[%s:%d(%s)] " fmt), __FILE__, __LINE__, __PRETTY_FUNCTION__, ##__VA_ARGS__);
+
+#define elog(fmt, ...) fprintf(stderr, ("[%s:%d(%s)] " fmt), __FILE__, __LINE__, __PRETTY_FUNCTION__, ##__VA_ARGS__)
+
 #else
-#define elog(fmt, ...) fprintf(stderr, (fmt), ##__VA_ARGS__);
+
+#define elog(fmt, ...) \
+    do { \
+        syslog(LOG_ERR, (fmt), ##__VA_ARGS__); \
+        fprintf(stderr, (fmt), ##__VA_ARGS__); \
+} while(0)
+
 #define dlog(fmt, ...) do { ; } while(0)
 #define vlog(fmt, ...) do { ; } while(0)
 #endif
@@ -23,8 +41,11 @@ size_t strlcat(char *dst, const char *src, size_t len);
 const char *u_ntop(const struct in6_addr ip_addr, int af, char *dest);
 void bucket_keys_NULL();
 int set_chroot(void);
-int drop_privs(void);
+long get_gid(const char *group);
+long get_uid(const char *user, int *group);
+int drop_privs(long uid, long gid);
 int is_valid_path(const char *path);
+int touch_pid_file(const char *path, long uid, long gid);
 int create_pid_file(const char *path);
 void game_over();
 void end_all_sessions();

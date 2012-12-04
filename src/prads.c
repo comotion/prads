@@ -22,7 +22,7 @@
 */
 
 /*  I N C L U D E S  *********************************************************/
-#ifdef OSX
+#ifdef __APPLE__
 #include <sys/malloc.h>
 #else
 #include <malloc.h>
@@ -49,8 +49,12 @@
 #define CONFDIR "/etc/prads/"
 #endif
 
+#define ARGS "C:c:b:d:Dg:hi:p:r:P:u:va:l:f:qtxs:OXFRMSAKUTIZt"
+
 /*  G L O B A L S  *** (or candidates for refactoring, as we say)***********/
 globalconfig config;
+extern int optind, opterr, optopt; // getopt()
+
 time_t tstamp;
 servicelist *services[MAX_PORTS];
 int inpacket, gameover, intr_flag;
@@ -102,8 +106,6 @@ void got_packet(u_char * useless, const struct pcap_pkthdr *pheader,
     config.pr_s.got_packets++;
     packetinfo pstruct = {0};
     packetinfo *pi = &pstruct;
-    // memset(&pi, 0, sizeof(packetinfo));
-    //pi = (packetinfo *) calloc(1, sizeof(packetinfo));
     pi->our = 1;
     pi->packet = packet;
     pi->pheader = pheader;
@@ -136,7 +138,6 @@ void got_packet(u_char * useless, const struct pcap_pkthdr *pheader,
     if (!pi->our) vlog(0x3, "Not our network packet. Tracked, but not logged.\n");
 #endif
     inpacket = 0;
-    //free(pi);
     return;
 }
 
@@ -185,11 +186,13 @@ inline int filter_packet(const int af, void *ipptr)
         {
             /* 32-bit comparison of ipv6 nets.
              * can do better here by using 64-bit or SIMD instructions
+             * this code needs more thought and work
              *
              *
              * PS: use same code for ipv4 - 0 bytes and SIMD doesnt care*/
 
-            ip_vec.ip6 = *((struct in6_addr *)ipptr);
+            // copy the in6_addr pointed to by ipptr into the vector. grr!
+            memcpy(&ip_vec.ip6,ipptr, sizeof(struct in6_addr));
             for (i = 0; i < MAX_NETS && i < nets; i++) {
                 if(network[i].type != AF_INET6)
                     continue;
@@ -1030,11 +1033,23 @@ void game_over()
                print_pcap_stats();
         }
         if (config.handle != NULL) pcap_close(config.handle);
+        if (ISSET_CONFIG_SYSLOG(config)) closelog();
         free_config();
-        olog("\n[*] prads ended.\n");
+        olog("[*] prads ended.\n");
         exit(0);
     }
     intr_flag = 1;
+}
+
+void reparse_conf()
+{
+    if(inpacket == 0) {
+        olog("Reparsing config file...");
+        parse_config_file(config.file);
+        intr_flag = 0;
+        return;
+    }
+    intr_flag = 4;
 }
 
 void check_interrupt()
@@ -1046,6 +1061,8 @@ void check_interrupt()
         update_asset_list();
     } else if (intr_flag == 3) {
         set_end_sessions();
+    } else if (intr_flag == 4) {
+        reparse_conf();
     } else {
         intr_flag = 0;
     }
@@ -1113,6 +1130,7 @@ static void usage()
     olog(" -b <filter>     Apply Berkeley packet filter <filter>.\n");
     olog(" -u <user>       Run as user <user>.\n");
     olog(" -g <group>      Run as group <group>.\n");
+    olog(" -d              Do not drop privileges.\n");
     olog(" -a <nets>       Specify home nets (eg: '192.168.0.0/25,10.0.0.0/255.0.0.0').\n");
     olog(" -D              Enables daemon mode.\n");
     //olog(" -d            to logdir\n");
@@ -1131,8 +1149,95 @@ static void usage()
     olog(" -h              This help message.\n");
 }
 
+int prads_initialize(globalconfig *conf)
+{
+    if (conf->pcap_file) {
+        /* Read from PCAP file specified by '-r' switch. */
+        olog("[*] Reading from file %s\n", conf->pcap_file);
+        if (!(conf->handle = pcap_open_offline(conf->pcap_file, conf->errbuf))) {
+            olog("[*] Unable to open %s.  (%s)", conf->pcap_file, conf->errbuf);
+        } 
 
-extern int optind, opterr, optopt; // getopt()
+    } else {
+        int uid, gid;
+        if(conf->drop_privs_flag) {
+            if(getuid() != 0) {
+                conf->drop_privs_flag = 0;
+                elog("[!] Can't drop privileges, not root.\n");
+            } else {
+                /* getting numerical ids before chroot call */
+                gid = get_gid(conf->group_name);
+                uid = get_uid(conf->user_name, &gid);
+                if(!gid){
+                    elog("[!] Problem finding user %s group %s\n", conf->user_name, conf->group_name);
+                    exit(ENOENT);
+                }
+                if (gid && getuid() == 0 && initgroups(conf->user_name, gid) < 0) {
+                    elog("[!] Unable to init group names (%s/%lu)\n", conf->user_name, gid);
+                }
+            }
+        }
+
+        /* * look up an available device if non specified */
+        if (conf->dev == 0x0)
+            conf->dev = pcap_lookupdev(conf->errbuf);
+        if (conf->dev){
+            *conf->errbuf = 0;
+        }else{
+            elog("[*] Error looking up device: '%s', try setting device with -i flag.\n", conf->errbuf);
+            exit(1);
+        }
+
+        olog("[*] Device: %s\n", conf->dev);
+    
+        if ((conf->handle = pcap_open_live(conf->dev, SNAPLENGTH, 1, 500, conf->errbuf)) == NULL) {
+            elog("[!] Error pcap_open_live: %s \n", conf->errbuf);
+            exit(1);
+        }
+        /* * B0rk if we see an error... */
+        if (strlen(conf->errbuf) > 0) {
+            elog("[*] Error errbuf: %s \n", conf->errbuf);
+            exit(1);
+        }
+
+        if(conf->chroot_dir){
+
+            olog("[*] Chrooting to dir '%s'..\n", conf->chroot_dir);
+            if(set_chroot()){
+                elog("[!] failed to chroot\n");
+                exit(1);
+            }
+        }
+        /* gotta create/chown pidfile before dropping privs */
+        if(conf->pidfile)
+            touch_pid_file(conf->pidfile, uid, gid);
+    
+        if (conf->drop_privs_flag && ( uid || gid)) {
+            olog("[*] Dropping privileges to %s:%s...\n", 
+               conf->user_name?conf->user_name:"", conf->group_name?conf->group_name:"");
+            drop_privs(uid, gid);
+        }
+
+       if(conf->pidfile){
+            if (!is_valid_path(conf->pidfile)){
+                elog("[!] Pidfile '%s' is not writable.\n", conf->pidfile);
+                exit(ENOENT);
+            }
+       }
+        if (conf->daemon_flag) {
+            olog("[*] Daemonizing...\n");
+            daemonize(NULL);
+        }
+        if (conf->pidfile) {
+           int rc;
+           if((rc=create_pid_file(conf->pidfile))) {
+               elog("[!] pidfile error, wrong permissions or prads already running? %s: %s\n", conf->pidfile, strerror(rc));
+               exit(ENOENT);
+           }
+        }
+    }
+    return 0;
+}
 
 /* magic main */
 int main(int argc, char *argv[])
@@ -1143,10 +1248,7 @@ int main(int argc, char *argv[])
     vlog(2, "%08x =? %08x, endianness: %s\n\n", 0xdeadbeef, ntohl(0xdeadbeef), (0xdead == ntohs(0xdead)?"big":"little") );
 
     memset(&config, 0, sizeof(globalconfig));
-    set_default_config_options();
-    bstring pconfile = bfromcstr(CONFDIR "prads.conf");
-    //parse_config_file(pconfile);
-    //bdestroy (pconfile);
+    set_default_config_options(&config);
 
     inpacket = gameover = intr_flag = 0;
 
@@ -1154,15 +1256,14 @@ int main(int argc, char *argv[])
     signal(SIGINT, game_over);
     signal(SIGQUIT, game_over);
     signal(SIGALRM, set_end_sessions);
-    //signal(SIGALRM, game_over); // Use this to debug segfault when exiting
+    signal(SIGHUP, reparse_conf);
 
     // do first-pass args parse for commandline-passed config file
     opterr = 0;
-#define ARGS "C:c:b:d:Dg:hi:p:r:P:u:va:l:f:qtxs:OXFRMSAKUTIZt"
     while ((ch = getopt(argc, argv, ARGS)) != -1)
         switch (ch) {
         case 'c':
-            pconfile = bfromcstr(optarg);
+            config.file = optarg;
             break;
         case 'v':
             config.verbose++;
@@ -1177,126 +1278,26 @@ int main(int argc, char *argv[])
     if(config.verbose)
         verbose_already = 1;
 
-    parse_config_file(pconfile);
+    parse_config_file(config.file);
 
     // reset verbosity before 2nd coming, but only if set on cli
     if(verbose_already)
         config.verbose = 0;
     optind = 1;
 
-    while ((ch = getopt(argc, argv, ARGS)) != -1)
-        switch (ch) {
-        case 'a':
-            if(strlen(optarg) == 0)
-                config.s_net = DEFAULT_NETS;
-            else
-                config.s_net = strdup(optarg);
-            break;
-        case 'c':
-            pconfile = bfromcstr(optarg);
-            break;
-        case 'C':
-            config.chroot_dir = strdup(optarg);
-            break;
-        case 'i':
-            config.dev = strdup(optarg);
-            break;
-        case 'r':
-            config.pcap_file = strdup(optarg);
-            break;
-        case 'b':
-            config.bpff = strdup(optarg);
-            break;
-        case 'v':
-            config.verbose++;
-            config.cflags |= CONFIG_VERBOSE;
-            break;
-        case 'd':
-            config.dpath = strdup(optarg);
-            break;
-        case 'h':
-            usage();
-            exit(0);
-            break;
-        case 'D':
-            config.daemon_flag = 1;
-            break;
-        case 'u':
-            config.user_name = strdup(optarg);
-            config.drop_privs_flag = 1;
-            break;
-        case 'g':
-            config.group_name = strdup(optarg);
-            config.drop_privs_flag = 1;
-            break;
-        case 'p':
-            config.pidfile = strdup(optarg);
-            break;
-        case 'l':
-            config.assetlog = strdup(optarg);
-            break;
-        case 'f':
-            config.fifo = strdup(optarg);
-            break;
-        case 's':
-            config.payload = strtol(optarg, NULL, 0);
-            break;
-        case 'q':
-            config.cflags |= CONFIG_QUIET;
-            break;
-        case 'O':
-            config.cflags |= CONFIG_CONNECT;
-            break;
-        case 'Z':
-            config.cflags |= CONFIG_PDNS;
-            break;
-        case 'x':
-            config.cflags |= CONFIG_CXWRITE;
-            break;
-        case 'X':
-            config.ctf = 0;
-            config.cof = 0;
-            break;
-        case 'F':
-            config.ctf |= CO_FIN;
-            break;
-        case 'R':
-            config.ctf |= CO_RST;
-            break;
-        case 'M':
-            config.cof |= CS_MAC;
-            config.cof |= CS_ARP;
-            break;
-        case 'S':
-            config.ctf |= CO_SYN;
-            break;
-        case 'A':
-            config.ctf |= CO_ACK;
-            break;
-        case 'K':
-            config.ctf |= CO_SYNACK;
-            break;
-        case 'U':
-            config.cof |= CS_UDP_SERVICES;
-            break;
-        case 'T':
-            config.cof |= CS_TCP_SERVER;
-            break;
-        case 'I':
-            config.cof |= CS_ICMP;
-            break;
-        case 't':
-            config.cof |= CS_TCP_CLIENT;
-            break;
-        case '?':
-            elog("unrecognized argument: '%c'\n", optopt);
-            break;
-        default:
-            elog("Did not recognize argument '%c'\n", ch);
-        }
-
-    bdestroy (pconfile);
+    if(parse_args(&config, argc, argv, ARGS) != 0){
+        usage();
+        exit(0);
+    }
     // we're done parsing configs - now initialize prads
+
+    if(ISSET_CONFIG_SYSLOG(config)) {
+        openlog("prads", LOG_PID | LOG_CONS, LOG_DAEMON);
+    }
+    olog("[*] Running prads %s\n", VERSION);
+    olog("    Using %s\n", pcap_lib_version());
+    olog("    Using PCRE version %s\n", pcre_version());
+
 
     if(config.verbose){
         rc = init_logging(LOG_STDOUT, NULL, config.verbose);
@@ -1343,59 +1344,9 @@ int main(int argc, char *argv[])
     load_foo(load_servicefp_file, cof, CS_TCP_CLIENT, sig_file_cli_tcp, sig_client_tcp, sig_hashsize, dump_sig_service);
     init_services();
 
-    olog("\n[*] Running prads %s\n", VERSION);
-    olog("    Using %s\n", pcap_lib_version());
-    olog("    Using PCRE version %s\n", pcre_version());
+    display_config(&config);
 
-    //if (config.verbose) display_config();
-    display_config();
-
-    if (config.pcap_file) {
-        /* Read from PCAP file specified by '-r' switch. */
-        olog("[*] Reading from file %s\n", config.pcap_file);
-        if (!(config.handle = pcap_open_offline(config.pcap_file, config.errbuf))) {
-            olog("[*] Unable to open %s.  (%s)", config.pcap_file, config.errbuf);
-        } 
-
-    } else {
-
-        /* * look up an available device if non specified */
-        if (config.dev == 0x0)
-            config.dev = pcap_lookupdev(config.errbuf);
-        olog("[*] Device: %s\n", config.dev);
-    
-        if ((config.handle = pcap_open_live(config.dev, SNAPLENGTH, 1, 500, config.errbuf)) == NULL) {
-            olog("[*] Error pcap_open_live: %s \n", config.errbuf);
-            exit(1);
-        }
-        /* * B0rk if we see an error... */
-        if (strlen(config.errbuf) > 0) {
-            elog("[*] Error errbuf: %s \n", config.errbuf);
-            exit(1);
-        }
-
-        if(config.chroot_dir){
-            olog("[*] Chrooting to dir '%s'..\n", config.chroot_dir);
-            if(set_chroot()){
-                elog("[!] failed to chroot\n");
-                exit(1);
-            }
-        }
-    
-        if (config.drop_privs_flag) {
-            olog("[*] Dropping privs...\n");
-            drop_privs();
-        }
-
-        if (config.daemon_flag) {
-            if (!is_valid_path(config.pidfile))
-                elog("[*] Unable to create pidfile '%s'\n", config.pidfile);
-            openlog("prads", LOG_PID | LOG_CONS, LOG_DAEMON);
-            olog("[*] Daemonizing...\n\n");
-            daemonize(NULL);
-        }
-    
-    }
+    prads_initialize(&config);
  
     bucket_keys_NULL();
     alarm(SIG_ALRM);
@@ -1411,16 +1362,10 @@ int main(int argc, char *argv[])
     }
 
     cxt_init();
-    olog("[*] Sniffing...\n\n");
+    olog("[*] Sniffing...\n");
     pcap_loop(config.handle, -1, got_packet, NULL);
 
     game_over();
-    //pcap_close(config.handle);
     return (0);
 }
 
-//void free_config()
-//{
-//    if (config.dev != NULL) free (config.dev);
-//    if (config.cfilter.bf_insns != NULL) free (config.cfilter.bf_insns);
-//}

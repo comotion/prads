@@ -1,17 +1,55 @@
 #Makefile
 #CC=gcc
 UNAME := $(shell uname -s)
-CFLAGS=-O3
+CFLAGS+=-O3
 
-#STATIC=y
+# for finding static libraries
+LIBDIR=/usr/lib/x86_64-linux-gnu
+
+# RHEL5 libresolv doesnt export certain essential symbols, but they are present
+ifneq ($(findstring 5.,$(shell [ -f /etc/redhat-release ] && cat /etc/redhat-release | awk '{ print $3 }')),)
+LDFLAGS+=/usr/lib64/libresolv.a
+endif
+
+ifeq (${RELEASE},)
+CFLAGS+=-DRELEASE='"$(shell git describe | cut -f2- -d_ | sed s/`git tag -l | grep -v /| tail -n1`//)"'
+endif
+
+# for using a newer libpcap
+ifneq (${PCAPDIR},)
+LDFLAGS+=-L${PCAPDIR}
+else
+PCAPDIR=${LIBDIR}
+endif
+
 ifeq (${STATIC},)
+
+ifeq (${JEMALLOC},y)
+CFLAGS+=-DUSE_JEMALLOC
+LDFLAGS+=-ljemalloc
+endif
+# if you want to use perftools
+ifeq (${TCMALLOC},y)
+LDFLAGS+=-ltcmalloc
+endif
 LDFLAGS+=-lpcap -lpcre -lresolv
-CFLAGS+=-DCONFDIR='"${CONFDIR}/"' -DRELEASE='"$(shell git describe | cut -f2- -d_ | sed s/`git tag -l | grep -v /| tail -n1`//)"'
+CFLAGS+=-DCONFDIR='"${CONFDIR}/"'
+
 else
 
-CFLAGS+=-DCONFDIR='"prads/"'
-LDFLAGS=-Llibpcap-1.1.1/ -lpcap
-LDFLAGS+=/usr/lib/libpcre.a /usr/lib/libresolv.a 
+ifeq (${JEMALLOC},y)
+CFLAGS+=-DUSE_JEMALLOC
+LDFLAGS+=${LIBDIR}/libjemalloc.a
+endif
+
+ifeq (${TCMALLOC},y)
+LDFLAGS+=/usr/lib/libtcmalloc_minimal.a
+endif
+
+CFLAGS+=-DCONFDIR='"prads.d/"' -static
+LDFLAGS=-static
+LDFLAGS+=${LIBDIR}/libpcre.a ${PCAPDIR}/libpcap.a ${LIBDIR}/libresolv.a
+
 endif
 
 ifneq (${DEBUG},)
@@ -19,6 +57,9 @@ CFLAGS = -g -DDEBUG -Wall -DCONFDIR='"${CONFDIR}/"'
 endif
 ifneq (${PROFILE},)
 CFLAGS=-g -pg -DCONFDIR='"${CONFDIR}/"'
+endif
+ifneq (${PPROF},)
+LDFLAGS+=-lprofiler
 endif
 ifneq (${EXTRADEBUG},)
 CFLAGS+= -DDUMP_HASH -DDEBUG_HASH -DDEBUG=2 -DDEBUG=2
@@ -60,8 +101,8 @@ prads: $(OBJECTS)
 shm-client: $(SHM_CLIENT_OBJECTS)
 	$(CC) $(CFLAGS) -o $@ $(SHM_CLIENT_OBJECTS) $(LDFLAGS)
 
-static: $(OBJECTS)
-	$(MAKE) CFLAGS+=-static prads
+static: 
+	$(MAKE) STATIC=y prads
 
 debug:
 	 ${MAKE} DEBUG=y

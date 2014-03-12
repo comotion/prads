@@ -196,9 +196,16 @@ inline int filter_packet(const int af, void *ipptr)
                 if(network[i].type != AF_INET6)
                     continue;
 #ifdef DEBUG_PACKET
+                struct in6_addr tmp_netmask;
+
+                IP6ADDR0(&tmp_netmask) = htonl(IP6ADDR0(&network[i].mask));
+                IP6ADDR1(&tmp_netmask) = htonl(IP6ADDR1(&network[i].mask));
+                IP6ADDR2(&tmp_netmask) = htonl(IP6ADDR2(&network[i].mask));
+                IP6ADDR3(&tmp_netmask) = htonl(IP6ADDR3(&network[i].mask));
+
                 u_ntop(network[i].addr, af, output);
                 dlog("net:  %s\n", output);
-                u_ntop(network[i].mask, af, output);
+                u_ntop(tmp_netmask, af, output);
                 dlog("mask: %s\n", output);
                 u_ntop(ip_vec.ip6, af, output);
                 dlog("ip: %s\n", output);
@@ -1135,12 +1142,11 @@ static void usage()
     olog(" -r <file>       Read pcap <file>.\n");
     olog(" -c <file>       Read config from <file>\n");
     olog(" -b <filter>     Apply Berkeley packet filter <filter>.\n");
-    olog(" -u <user>       Run as user <user>.\n");
-    olog(" -g <group>      Run as group <group>.\n");
+    olog(" -u <user>       Run as user <user>   (Default: uid 1)\n");
+    olog(" -g <group>      Run as group <group> (Default: gid 1)\n");
     olog(" -d              Do not drop privileges.\n");
     olog(" -a <nets>       Specify home nets (eg: '192.168.0.0/25,10.0.0.0/255.0.0.0').\n");
     olog(" -D              Daemonize.\n");
-    //olog(" -d            to logdir\n");
     olog(" -p <pidfile>    Name of pidfile - inside chroot\n");
     olog(" -l <file>       Log assets to <file> (default: '%s')\n", config.assetlog);
     olog(" -f <FIFO>       Log assets to <FIFO>\n");
@@ -1152,7 +1158,7 @@ static void usage()
     olog(" -s <snaplen>    Dump <snaplen> bytes of each payload.\n");
     olog(" -v              Verbose output - repeat for more verbosity.\n");
     olog(" -q              Quiet - try harder not to produce output.\n");
-    olog(" -L <dir>        log cxtracker type output to <dir>.\n");
+    olog(" -L <dir>        log cxtracker type output to <dir> (will be owned by <uid>).\n");
     olog(" -O              Connection tracking [O]utput - per-packet!\n");
     olog(" -x              Conne[x]ion tracking output  - New, expired and ended.\n");
     olog(" -Z              Passive DNS (Experimental).\n");
@@ -1289,13 +1295,23 @@ int prads_initialize(globalconfig *conf)
                conf->user_name?conf->user_name:"", conf->group_name?conf->group_name:"");
             drop_privs(uid, gid);
         }
+        /* NOTE: we init sancp-style conntrack-logging after dropping privs,
+         * because the logs need rotation after dropping privs */
+        if(config.cxtlogdir[0] != '\0'){
+           static char log_prefix[PATH_MAX];
+           snprintf(log_prefix, PATH_MAX, "%sstats.%s", 
+                    config.cxtlogdir, config.dev? config.dev : "pcap");
+           int rc = init_logging(LOG_SGUIL, log_prefix, 0);
+           if (rc)
+              perror("Logging to sguil output failed!");
+        }
 
-       if(conf->pidfile){
-            if (!is_valid_path(conf->pidfile)){
-                elog("[!] Pidfile '%s' is not writable.\n", conf->pidfile);
-                exit(ENOENT);
-            }
-       }
+        if(conf->pidfile){
+           if (!is_valid_path(conf->pidfile)){
+              elog("[!] Pidfile '%s' is not writable.\n", conf->pidfile);
+              exit(ENOENT);
+           }
+        }
         if (conf->daemon_flag) {
             olog("[*] Daemonizing...\n");
             daemonize(NULL);
@@ -1376,33 +1392,19 @@ int main(int argc, char *argv[])
         usage();
         exit(0);
     }
-
     // we're done parsing configs - now initialize prads
-
     if(ISSET_CONFIG_SYSLOG(config)) {
         openlog("prads", LOG_PID | LOG_CONS, LOG_DAEMON);
     }
-
-    if(config.cxtlogdir){
-       static char log_prefix[PATH_MAX];
-       snprintf(log_prefix, PATH_MAX, "%sstats.%s", 
-            config.cxtlogdir, config.dev? config.dev : "pcap");
-       rc = init_logging(LOG_SGUIL, log_prefix, 0);
-       if (rc)
-          perror("Logging to sguil output failed!");
-    }
-
     if (config.ringbuffer) {
         rc = init_logging(LOG_RINGBUFFER, NULL, config.cflags);
         if (rc)
             perror("Logging to ringbuffer failed!");
     }
-
     if (config.cflags & (CONFIG_VERBOSE | CONFIG_CXWRITE | CONFIG_CONNECT)) {
         rc = init_logging(LOG_STDOUT, NULL, config.cflags);
         if(rc) perror("Logging to standard out failed!");
     }
-
     if(config.assetlog) {
         olog("logging to file '%s'\n", config.assetlog);
         rc = init_logging(LOG_FILE, config.assetlog, config.cflags);
@@ -1413,6 +1415,7 @@ int main(int argc, char *argv[])
         rc = init_logging(LOG_FIFO, config.fifo, config.cflags);
         if(rc) perror("Logging to fifo failed!");
     }
+    /* moved NOTE: cxtlog is inited in prads_initialize, after dropping privs */
     if(config.s_net){
        parse_nets(config.s_net, network);
     }
